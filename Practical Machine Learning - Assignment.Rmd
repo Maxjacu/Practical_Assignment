@@ -2,30 +2,82 @@
 title: "Prediction Assignment Writeup"
 output: html_document
 ---
-
-
-
-```{r, echo=FALSE}
+**Load Packages**
+```{r}
 library(caret)
 library(rattle)
 library(rpart.plot)
-
-training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
-testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
-training <- training[,-1]
-testing <- testing[,-1]
-
-modelfit <- train(classe ~ ., method="rpart", data= training)
-modelfit2 <- train(classe ~ ., method="glm", preProcess="pca", data= training)
-
-print(modelfit$finalModel)
-fancyRpartPlot(modelfit$finalModel, sub = "")
+library(ggplot2)
 ```
 
+**Get Data, prepare for model building**
+We are looking at a table with 151 potential predictor variables. 
+```{r}
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+#Drop columns that don't add value for our predicion
+training2 <- training[, -seq(from = 1, to = 8, by = 1)]
+set.seed(244)
 
+# Test Subset with 40% of Total Training Data
+inTest <- createDataPartition(y = training2$classe, p = 0.4, list = F)
+testSub <- training2[inTest, ]
+
+# Training Subset with 60% of Total Training Data
+trainingSub <- training2[-inTest, ]
+```
+
+This dataset has a lot of variables that are sparse. To make our predictiors  more relevant it might be a good idea to get rid of variables that are sparse. Lets drop all that are NA for more than 15% of the observations.
+
+```{r}
+# Function: How Sparse is variable
+sparse <- function(df) {
+    n <- length(df)
+    na.count <- sum(is.na(df))
+    return((n - na.count)/n)
+}
+
+# sparness of input variables based on training subset
+sparseness <- apply(trainingSub, 2, sparse)
+
+# drop sparse variables
+trainingSub2 <- trainingSub[, sparseness > 0.85]
+```
+
+**Choosing the model** 
+I will go ahead and use random forest to predict 'classe'. This prediction method is especially well suited for large number of variables or predictors.
+
+```{r}
+trainingSub2.10 <- createDataPartition(y = trainingSub2$classe, p = 0.005, list = F)
+varImpSub <- trainingSub2[trainingSub2.10, ]
+varImpRF <- train(classe ~ ., data = varImpSub, method = "rf")
+
+require(randomForest)
+require(e1071)
+require(class)
+
+varImpObj <- varImp(varImpRF)
+#Perform Random Forest on the 25% most important predictors.
+finalTraingData <- trainingSub2[-trainingSub2.10, ]
+impThresh <- quantile(varImpObj$importance[, 1], 0.75)
+impfilter <- varImpObj$importance[, 1] >= impThresh
+finalTraingData <- finalTraingData[, impfilter]
+rfModel <- train(classe ~ ., data = finalTraingData, method = "rf")
+```
+
+**Expectation Out-of-Sample Error**
+We are using 40% of the overall training subset to estimate the Out-of-Sample Error. This subset has not been used for creating the model.
+
+```{r}
+# Apply data trimming to subdata set
+testSub2 <- testSub[, sparseness > 0.85]
+prediction <- predict(rfModel, testSub2)
+missClass = function(values, prediction) {
+    sum(prediction != values)/length(values)
+}
+errRate = missClass(finalTestSub$classe, prediction)
+```
 
 ```{r, echo=FALSE}
 
 ```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
